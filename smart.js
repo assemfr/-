@@ -1,6 +1,8 @@
 /* smart.js — onboarding, activity-based filtering, hidden-expense engine, pricing assistant, fast entry, reports & sharing */
 (function(){
 'use strict';
+/* NB: form.elements.item is the built-in item() method, so always look fields up by selector */
+const fe=(f,n)=>f.querySelector('[name="'+n+'"]');
 const B=(a,e)=>uiLang==='en'?e:a;
 const LS=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}};
 const P=()=>(typeof state!=='undefined'&&state.prefs)||{};
@@ -182,7 +184,7 @@ function initDealForm(){
   const edit=editingId?docById('records',editingId):null;
   if(edit&&edit.goodType)f.dataset.manualCat='1';
   const lv=document.createElement('div');lv.id='px-live';lv.className='px-live';lv.hidden=true;lv.setAttribute('aria-live','polite');f.appendChild(lv);
-  autoOverhead(f,edit);syncCategory(f,!edit);lastDealHint(f);recalc(f);
+  autoOverhead(f,edit);syncCategory(f,!edit);lastDealHint(f);recalc(f);stockSync(f);
 }
 
 /* ---------- datalists ---------- */
@@ -219,7 +221,7 @@ function duplicateDeal(id){
   const r=docById('records',id);if(!r)return;
   editingId=null;currentPage='deals';render();
   const f=dealForm();if(!f)return;
-  const set=(n,v)=>{if(f.elements[n]&&v!==undefined&&v!==null)f.elements[n].value=v};
+  const set=(n,v)=>{const el=fe(f,n);if(el&&v!==undefined&&v!==null)el.value=v};
   set('activity',r.activity||'');set('item',r.item);set('qty',r.qty||1);
   set('supplier',r.supplier||r.sn||'');set('supplierPhone',r.supplierPhone||r.sp||'');set('customer',r.customer||r.cn||'');set('customerPhone',r.customerPhone||r.cp||'');
   set('purchase',r.purchase??r.buy??'');set('sale',r.sale??r.sell??'');set('method',r.method||'نقداً');
@@ -227,8 +229,8 @@ function duplicateDeal(id){
   (r.expenseItems||[]).forEach(x=>{const i=f.querySelector(`[data-exp="${x.k}"]`);if(i&&!['feed','vet','care'].includes(x.k))i.value=x.v});
   if(r.rearing)f.querySelectorAll('[data-rear]').forEach(i=>{i.value=r.rearing[i.dataset.rear]||''});
   const ch=$('#px-autochip');if(ch)ch.hidden=true;
-  syncCategory(f,true);lastDealHint(f);recalc(f);
-  requestAnimationFrame(()=>{if(f.isConnected&&f.elements.item&&!f.elements.item.value&&r.item){f.elements.item.value=r.item;syncCategory(f,true);lastDealHint(f)}});
+  unlockMv(f);syncCategory(f,true);lastDealHint(f);recalc(f);stockSync(f);
+  requestAnimationFrame(()=>{if(f.isConnected&&fe(f,'item')&&!fe(f,'item').value&&r.item){fe(f,'item').value=r.item;syncCategory(f,true);lastDealHint(f)}});
   scrollToForm('deal');toast(B('نُسخت بيانات الصفقة؛ عدّل ما يلزم ثم احفظ.','Deal copied — adjust and save.'));
 }
 
@@ -236,8 +238,9 @@ function duplicateDeal(id){
 document.addEventListener('input',e=>{
   const f=e.target.closest&&e.target.closest('form[data-form="deal"]');if(!f||!f.dataset.px||e.target.name==='expenses')return;
   const n=e.target.name;
-  if(n==='item'){syncCategory(f);lastDealHint(f)}
-  recalc(f);
+  if(n==='item'){unlockMv(f);syncCategory(f);lastDealHint(f)}
+  if(n==='purchase'&&e.isTrusted){f.elements.purchase.dataset.touched='1';delete f.dataset.autoBuy}
+  recalc(f);stockSync(f);
 });
 document.addEventListener('change',e=>{
   const f=e.target.closest&&e.target.closest('form[data-form="deal"]');if(!f||!f.dataset.px)return;
@@ -248,6 +251,20 @@ document.addEventListener('change',e=>{
   else if(n==='supplier')fillPhone(f,'supplier','supplierPhone',['supplier','sn','supplierPhone','sp']);
   else if(n==='customer')fillPhone(f,'customer','customerPhone',['customer','cn','customerPhone','cp']);
 });
+document.addEventListener('submit',e=>{
+  const f=e.target.closest&&e.target.closest('form[data-form="deal"]');if(!f||!f.dataset.px||f.dataset.stockOk==='1')return;
+  if(pref().inventoryMode!=='auto'||effMove(f)!=='out')return;
+  const nm=String(fe(f,'item').value||'').trim().toLowerCase(),qty=num(f.elements.qty.value)||1;
+  const it=liveDocs('catalog').find(x=>String(x.name||'').trim().toLowerCase()===nm);
+  const avail=it?num(it.stock):0;
+  if(it&&avail>=qty)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  askConfirm(it?B(`المتوفر في المخزون ${avail} فقط وأنت تبيع ${qty}. هل تسجّل البيع على أي حال (يصير المخزون صفراً)؟`,`Only ${avail} in stock but you are selling ${qty}. Record the sale anyway (stock becomes zero)?`):B('هذه السلعة غير مسجّلة في المخزون. هل تسجّل البيع دون خصم من المخزون؟ (يُفضّل تسجيل التوريد أولاً)','This item is not in stock records. Record the sale without a stock deduction? (Better to record the purchase first)'),{ok:B('سجّل البيع','Record sale'),cancel:B('رجوع','Back'),danger:false}).then(ok=>{
+    if(!ok)return;
+    let h=f.elements.allowShort;if(!h){h=document.createElement('input');h.type='hidden';h.name='allowShort';f.appendChild(h)}
+    h.value='1';f.dataset.stockOk='1';f.requestSubmit();
+  });
+},true);
 document.addEventListener('submit',e=>{
   const f=e.target.closest&&e.target.closest('form[data-form="deal"]');if(!f||!f.dataset.px||f.dataset.expOk==='1')return;
   const g=gather(f);
@@ -274,6 +291,8 @@ document.addEventListener('click',e=>{
     recalc(f);toast(B('طُبّقت أسعار آخر صفقة','Last deal prices applied'));
   }else if(k==='clear-auto'&&f){['rent','wages','utilities','other'].forEach(n=>{const i=f.querySelector(`[data-exp="${n}"]`);if(i)i.value=''});$('#px-autochip').hidden=true;recalc(f)}
   else if(k==='dup')duplicateDeal(b.dataset.id);
+  else if(k==='st+'||k==='st-'){const c=docById('catalog',b.dataset.id);if(!c||!operationsWrite())return;updateDoc('catalog',c.id,{stock:Math.max(0,r2(num(c.stock)+(k==='st+'?1:-1)))});commit({message:'تم تعديل الكمية'})}
+  else if(k==='st='){const c=docById('catalog',b.dataset.id);if(!c||!operationsWrite())return;askQty(`${c.name}`,num(c.stock),c.unit).then(v=>{if(v===null)return;updateDoc('catalog',c.id,{stock:r2(v)});commit({message:'تم تصحيح الكمية بالجرد'})})}
   else if(k==='report-open')window.PXR.open();
 });
 
@@ -310,7 +329,7 @@ document.addEventListener('submit',e=>{
 let wz=null;
 function wzOpen(){
   const p=P();
-  wz={step:1,name:(p.shop&&p.shop.name&&!/^الدفتر المحلي$/.test(p.shop.name)?p.shop.name:'')||'',phone:(p.shop&&p.shop.phone)||'',address:(p.shop&&p.shop.address)||'',currency:p.currency||'د.م.',acts:[...(actsSel()||[])],fx:{rent:'',wages:'',utilities:'',other:'',deals:''}};
+  wz={step:1,name:(p.shop&&p.shop.name&&!/^الدفتر المحلي$/.test(p.shop.name)?p.shop.name:'')||'',phone:(p.shop&&p.shop.phone)||'',address:(p.shop&&p.shop.address)||'',currency:p.currency||'د.م.',acts:[...(actsSel()||[])],type:((P().legal||{}).type)||'individual',legal:{...(P().legal||{})},inv:!(P().setupDone&&P().inventoryMode==='manual'),fx:{rent:'',wages:'',utilities:'',other:'',deals:''}};
   wzDraw();
 }
 function wzDraw(){
@@ -320,7 +339,10 @@ function wzDraw(){
   if(S===1)body=`<h2>${B('مرحباً بك في دفتر التاجر','Welcome to Merchant Ledger')}</h2><p>${B('لنجهّز دفتر محلك في دقيقة. سيبقى كل شيء على هذا الجهاز.','Let us set up your shop book in a minute. Everything stays on this device.')}</p>
 <label class="field"><span>${B('اسم المحل أو النشاط *','Shop or business name *')}</span><input id="wz-name" class="control" value="${esc(wz.name)}" autocomplete="off" placeholder="${B('مثال: محل النور للإلكترونيات','e.g. Al-Nour Electronics')}"></label>
 <div class="form-grid"><label class="field"><span>${B('هاتف المحل','Shop phone')}</span><input id="wz-phone" class="control" type="tel" value="${esc(wz.phone)}"></label><label class="field"><span>${B('المدينة / العنوان','City / address')}</span><input id="wz-addr" class="control" value="${esc(wz.address)}"></label></div>
-<label class="field"><span>${B('العملة','Currency')}</span><input id="wz-cur" class="control" value="${esc(wz.currency)}"></label>`;
+<label class="field"><span>${B('العملة','Currency')}</span><input id="wz-cur" class="control" value="${esc(wz.currency)}"></label>
+<label class="field"><span>${B('نوع المحل','Business type')}</span><select id="wz-type" class="control"><option value="individual" ${wz.type!=='company'?'selected':''}>${B('محل فردي / تاجر','Individual / sole trader')}</option><option value="company" ${wz.type==='company'?'selected':''}>${B('شركة','Company')}</option></select></label>
+<div id="wz-co" class="form-grid" ${wz.type==='company'?'':'hidden'}><label class="field"><span>${B('الاسم القانوني للشركة','Legal company name')}</span><input id="wz-legalname" class="control" value="${esc((wz.legal||{}).companyName||'')}"></label><label class="field"><span>${B('السجل التجاري (RC)','Trade register (RC)')}</span><input id="wz-rc" class="control" value="${esc((wz.legal||{}).rc||'')}"></label><label class="field"><span>ICE</span><input id="wz-ice" class="control" value="${esc((wz.legal||{}).ice||'')}"></label></div>
+<label class="px-check"><input type="checkbox" id="wz-inv" ${wz.inv?'checked':''}><span><b>${B('تتبّع المخزون تلقائياً','Track stock automatically')}</b><small>${B('التوريد يضيف الكمية والبيع يخصمها، مع تنبيه عند النقص','Purchases add quantity, sales deduct it, with low-stock alerts')}</small></span></label>`;
   else if(S===2)body=`<h2>${B('ما الأنشطة التي تمارسها؟','Which activities do you run?')}</h2><p>${B('اختر نشاطاً واحداً أو أكثر. سنُظهر لك الأقسام والخيارات المناسبة فقط، ويمكنك التغيير لاحقاً من الإعدادات.','Pick one or more. We will show only the relevant sections and options; change it later in Settings.')}</p><div class="px-acts">${ACTS.map(a=>`<button type="button" class="px-act ${wz.acts.includes(a[0])?'on':''}" data-wz-act="${a[0]}" aria-pressed="${wz.acts.includes(a[0])}"><span>${a[1]}</span>${B(a[2],a[3])}</button>`).join('')}</div>`;
   else body=`<h2>${B('المصاريف الثابتة (الخفية)','Fixed (hidden) costs')}</h2><p>${B('هي ما يفرّق التاجر الماهر عن المبتدئ. أدخل ما تدفعه شهرياً لنوزّعه على كل صفقة ونقترح عليك أسعار بيع تضمن الربح. يمكنك التخطي وإكمالها لاحقاً.','These separate the skilled trader from the beginner. Enter what you pay monthly; we spread it on each deal and suggest prices that protect profit. You may skip and finish later.')}</p>
 <div class="form-grid">${[['rent',B('كراء المحل','Shop rent')],['wages',B('أجور العمال','Wages')],['utilities',B('كهرباء وماء وإنترنت','Utilities')],['other',B('مصاريف أخرى','Other')]].map(x=>`<label class="field"><span>${x[1]} / ${B('شهر','month')}</span><input id="wz-${x[0]}" class="control" type="number" min="0" step="any" inputmode="decimal" value="${esc(wz.fx[x[0]])}" placeholder="0"></label>`).join('')}</div>
@@ -332,7 +354,7 @@ function wzDraw(){
 }
 function wzRead(){
   const g=id=>{const e=$('#'+id);return e?e.value.trim():''};
-  if(wz.step===1){wz.name=g('wz-name');wz.phone=g('wz-phone');wz.address=g('wz-addr');wz.currency=g('wz-cur')||'د.م.'}
+  if(wz.step===1){wz.name=g('wz-name');wz.phone=g('wz-phone');wz.address=g('wz-addr');wz.currency=g('wz-cur')||'د.م.';const ty=$('#wz-type');if(ty){wz.type=ty.value;wz.legal={...(wz.legal||{}),companyName:g('wz-legalname'),rc:g('wz-rc'),ice:g('wz-ice')}};const iv=$('#wz-inv');if(iv)wz.inv=iv.checked}
   if(wz.step===3)['rent','wages','utilities','other','deals'].forEach(k=>wz.fx[k]=g('wz-'+k));
 }
 function wzCalc(){
@@ -345,6 +367,8 @@ async function wzFinish(withCosts){
   const fx=withCosts?{rent:num(wz.fx.rent),wages:num(wz.fx.wages),utilities:num(wz.fx.utilities),other:num(wz.fx.other),deals:num(wz.fx.deals)||30,auto:true}:undefined;
   const anyCost=fx&&(fx.rent+fx.wages+fx.utilities+fx.other)>0;
   const patch={shop:{...(P().shop||{}),name:wz.name,phone:wz.phone,address:wz.address},currency:wz.currency,activities:wz.acts,setupDone:true};
+  patch.inventoryMode=wz.inv?'auto':'manual';
+  patch.legal={...(P().legal||{}),type:wz.type==='company'?'company':'individual',...(wz.type==='company'?{companyName:(wz.legal||{}).companyName||'',rc:(wz.legal||{}).rc||'',ice:(wz.legal||{}).ice||''}:{})};
   if(anyCost)patch.fixed=fx;
   try{
     state.prefs={...state.prefs,...patch,_updatedAt:Date.now()};
@@ -373,6 +397,7 @@ document.addEventListener('click',e=>{
   if(a==='finish0'){wzFinish(false)}
 });
 document.addEventListener('input',e=>{if(wz&&e.target.closest&&e.target.closest('#px-wizard'))wzCalc()});
+document.addEventListener('change',e=>{if(e.target&&e.target.id==='wz-type'){const c=$('#wz-co');if(c)c.hidden=e.target.value!=='company'}});
 document.addEventListener('keydown',e=>{if(wz&&e.key==='Enter'&&e.target.tagName==='INPUT'){e.preventDefault();const n=document.querySelector('[data-wz="next"],[data-wz="finish"]');if(n)n.click()}});
 function maybeWizard(){
   if(wz||$('#px-wizard'))return;
@@ -514,12 +539,101 @@ renderDashboard=function(){
     const per=dashPeriod,[s,e]=per==='all'?['0000-01-01','9999-12-31']:per==='today'?rangeOf('today'):per==='week'?rangeOf('week'):per==='year'?rangeOf('year'):[iso(new Date(yr,mo,1)),iso(new Date(yr,mo+1,0))];
     const R=buildReport(s,e);
     const unk=R.exp.legacy||0,hint=R.exTotal>0&&unk/R.exTotal>0.4?`<div class="notice" style="margin-top:10px">${B(`${(unk/R.exTotal*100).toFixed(0)}٪ من مصاريفك غير مفصّلة. فصّلها (نقل، كراء، أجور…) لتعرف أين يضيع ربحك.`,`${(unk/R.exTotal*100).toFixed(0)}% of your expenses are unitemised. Break them down to see where profit leaks.`)}</div>`:'';
-    return h+`<div class="stack" style="margin-top:14px">${panel(B('أين تذهب مصاريفك؟','Where does your money go?'),`${expenseBars(R.exp,R.exTotal)}${hint}`)}</div>`;
+    let stk='';
+    if(trackOn()){const S=stockStats(),bad=S.rows.filter(x=>num(x.stock)<=0||(num(x.minStock)>0&&num(x.stock)<=num(x.minStock))).slice(0,6);
+      if(bad.length)stk=`<div class="stack" style="margin-top:14px">${panel(B('⚠️ تنبيه المخزون','⚠️ Stock alert'),bad.map(x=>`<div class="px-bar-h" style="padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(x.name)}</span><b class="${num(x.stock)<=0?'neg':''}">${num(x.stock)} ${esc(x.unit||'')}${num(x.stock)<=0?' · '+B('نفد','out'):''}</b></div>`).join('')+`<div style="margin-top:10px"><button type="button" class="btn btn-outline btn-small" data-page="catalog">${B('فتح المخزون','Open stock')}</button></div>`)}</div>`}
+    return h+`<div class="stack" style="margin-top:14px">${panel(B('أين تذهب مصاريفك؟','Where does your money go?'),`${expenseBars(R.exp,R.exTotal)}${hint}`)}</div>`+stk;
   }catch(err){return h}
+};
+
+
+/* ================= inventory (auto tracking) ================= */
+const trackOn=()=>P().inventoryMode==='auto';
+const nrm=x=>String(x||'').trim().toLowerCase();
+const findCat=name=>liveDocs('catalog').find(x=>nrm(x.name)===nrm(name));
+const MV=[['none','🔄','شراء وبيع معاً','Buy & sell now','لا يغيّر المخزون','No stock change'],['in','📥','توريد للمخزون','Stock in','يضيف الكمية','Adds quantity'],['out','📤','بيع من المخزون','Sell from stock','يخصم الكمية','Deducts quantity']];
+window.movementChips=function(edit){
+  const v=edit?.inventoryMovement||'';
+  return `<div class="field full px-moves"><span>${B('حركة المخزون','Stock movement')} <em>${B('(تُحدَّد تلقائياً من المبالغ ويمكنك تغييرها)','(auto from the amounts — you can change it)')}</em></span><div class="px-seg" role="radiogroup" aria-label="${B('حركة المخزون','Stock movement')}">${MV.map(x=>`<button type="button" role="radio" class="px-mv" data-mv="${x[0]}" aria-checked="false"><i>${x[1]}</i><b>${B(x[2],x[3])}</b><small>${B(x[4],x[5])}</small></button>`).join('')}</div><input type="hidden" name="inventoryMovement" value="${esc(v)}"><div id="px-stock" class="px-hint" hidden></div></div>`;
+};
+function effMove(f){
+  const h=f.elements.inventoryMovement;if(!h)return'none';
+  if(h.value)return h.value;
+  const buy=num(f.elements.purchase.value),sale=num(f.elements.sale.value);
+  return sale>0&&buy===0?'out':(buy>0&&sale===0?'in':'none');
+}
+function unlockMv(f){
+  if(f.dataset.autoMv==='1'){const h=f.elements.inventoryMovement;if(h)h.value='';delete f.dataset.autoMv}
+  if(f.dataset.autoBuy==='1'){f.elements.purchase.value='';delete f.dataset.autoBuy}
+}
+function stockSync(f){
+  const h=f.elements.inventoryMovement;if(!h)return;
+  const name=itemText(f).trim(),ci=name?findCat(name):null,qty=Math.max(0,num(f.elements.qty.value)||0);
+  if(!h.value&&ci&&num(ci.cost)>0&&qty>0&&num(f.elements.sale.value)>0&&num(f.elements.purchase.value)===0){
+    h.value='out';f.dataset.autoMv='1';f.elements.purchase.value=r2(qty*num(ci.cost));f.dataset.autoBuy='1';
+  }else if(f.dataset.autoBuy==='1'&&ci&&qty>0&&h.value==='out'&&f.elements.purchase.dataset.touched!=='1'){
+    f.elements.purchase.value=r2(qty*num(ci.cost));
+  }
+  const mv=effMove(f);
+  f.querySelectorAll('.px-mv').forEach(b=>{const on=b.dataset.mv===mv;b.classList.toggle('on',on);b.setAttribute('aria-checked',on);b.classList.toggle('auto',on&&!h.value)});
+  const box=$('#px-stock');if(!box)return;
+  let t='',cls='';
+  if(ci){
+    const st=num(ci.stock);
+    t=`📦 ${B('في المخزون','In stock')}: <b>${st} ${esc(ci.unit||'')}</b> · ${B('متوسط التكلفة','Avg cost')}: <b>${ci.cost!==''&&ci.cost!==undefined?money(ci.cost):'—'}</b>`;
+    if(mv==='out'&&qty>st){t+=`<br>⚠️ ${B(`الكمية المطلوبة (${qty}) أكبر من المتاح`,`Requested (${qty}) exceeds available`)}`;cls='warn'}
+    else if(mv==='out'){const left=st-qty,low=num(ci.minStock)>0&&left<=num(ci.minStock);t+=`<br>${B('بعد هذه الصفقة سيبقى','Remaining after this deal')}: <b>${left} ${esc(ci.unit||'')}</b>${low?` ⚠️ ${B('أقل من حد التنبيه','below the alert level')}`:''}`;if(low)cls='warn'}
+    else if(mv==='in')t+=`<br>${B('بعد التوريد سيصبح','After stock-in')}: <b>${st+qty} ${esc(ci.unit||'')}</b>`;
+    if(f.dataset.autoBuy==='1')t+=`<br>🧮 ${B('ثمن الشراء محسوب من متوسط تكلفة المخزون (تكلفة البضاعة المباعة).','Purchase is taken from the average stock cost (cost of goods sold).')}`;
+  }else if(name){
+    if(mv==='out'){t=`⚠️ ${B('لا يوجد مخزون مسجل لهذه السلعة؛ سجّل توريداً (شراء) أولاً.','No stock recorded for this item; record a stock-in (purchase) first.')}`;cls='warn'}
+    else if(mv==='in')t=`✨ ${B('سيُنشأ صنف جديد في المخزون تلقائياً بهذا الاسم.','A new stock item will be created automatically with this name.')}`;
+    else t=`ℹ️ ${B('هذه الصفقة لا تغيّر المخزون.','This deal does not change stock.')}`;
+  }
+  box.hidden=!t;box.className='px-hint '+cls;box.innerHTML=t;
+}
+document.addEventListener('click',e=>{
+  const c=e.target.closest&&e.target.closest('.px-mv');if(!c)return;
+  const f=c.closest('form');if(!f)return;const h=f.elements.inventoryMovement;
+  const was=h.value===c.dataset.mv;
+  if(f.dataset.autoBuy==='1'){f.elements.purchase.value='';delete f.dataset.autoBuy}
+  delete f.dataset.autoMv;h.value=was?'':c.dataset.mv;
+  stockSync(f);recalc(f);
+});
+function askQty(title,cur,unit){
+  return new Promise(res=>{
+    const old=$('#px-confirm');if(old)old.remove();
+    const d=document.createElement('div');d.id='px-confirm';
+    d.innerHTML=`<div class="px-cbackdrop"></div><div class="px-cbox" role="dialog" aria-modal="true"><p></p><label class="field" style="margin-top:12px"><span>${B('الكمية الفعلية بعد الجرد','Counted quantity')}${unit?' ('+esc(unit)+')':''}</span><input class="control" type="number" min="0" step="any" inputmode="decimal" id="px-qty" style="text-align:center;font-size:1.2rem"></label><div class="px-cbtns"><button type="button" class="btn btn-outline"></button><button type="button" class="btn btn-primary"></button></div></div>`;
+    d.querySelector('p').textContent=title;const inp=d.querySelector('#px-qty');inp.value=cur;
+    const [no,yes]=d.querySelectorAll('button');no.textContent=B('إلغاء','Cancel');yes.textContent=B('حفظ','Save');
+    const done=v=>{d.remove();res(v)};
+    no.onclick=()=>done(null);yes.onclick=()=>{const v=num(inp.value);done(v>=0?v:null)};
+    d.querySelector('.px-cbackdrop').onclick=()=>done(null);
+    inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')yes.click();if(ev.key==='Escape')done(null)});
+    document.body.append(d);inp.focus();inp.select();
+  });
+}
+function enhanceCatalog(){
+  document.querySelectorAll('button[data-action="edit-catalog"]').forEach(b=>{
+    if(b.previousElementSibling&&b.previousElementSibling.dataset.px==='st+')return;
+    const mk=(k,txt,tt)=>{const x=document.createElement('button');x.type='button';x.className='icon-action-sm';x.dataset.px=k;x.dataset.id=b.dataset.id;x.textContent=txt;x.title=tt;x.setAttribute('aria-label',tt);return x};
+    [mk('st-','−',B('إنقاص 1','Minus 1')),mk('st+','+',B('زيادة 1','Plus 1')),mk('st=','🔢 '+B('جرد','Count'),B('تصحيح الكمية بالجرد','Set counted quantity'))].forEach(x=>b.parentNode.insertBefore(x,b));
+  });
+}
+const stockStats=()=>{const rows=liveDocs('catalog');let val=0,low=0,out=0;rows.forEach(x=>{const st=num(x.stock);val+=st*num(x.cost);if(st<=0)out++;else if(num(x.minStock)>0&&st<=num(x.minStock))low++});return{n:rows.length,val,low,out,rows}};
+const _rc=renderCatalog;
+renderCatalog=function(){
+  const h=_rc();let st;try{st=stockStats()}catch(e){return h}
+  if(!st.n)return h;
+  const kp=(l,v,c)=>`<div class="px-kp"><small>${l}</small><b class="${c||''}">${v}</b></div>`;
+  const bar=`<div class="px-kps" style="margin-bottom:14px">${kp(B('عدد الأصناف','Items'),st.n)}${kp(B('قيمة المخزون بالتكلفة','Stock value at cost'),money(st.val))}${kp(B('مخزون منخفض','Low stock'),st.low,st.low?'neg':'')}${kp(B('نفد المخزون','Out of stock'),st.out,st.out?'neg':'')}</div>`;
+  const m=/<div class="content-grid">/.exec(h);
+  return m?h.slice(0,m.index)+bar+h.slice(m.index):h+bar;
 };
 
 /* ================= wiring ================= */
 const _render=render;
-render=function(){_render();initDealForm();enhanceDeals();maybeWizard()};
+render=function(){_render();initDealForm();enhanceDeals();enhanceCatalog();maybeWizard()};
 if(typeof workspace!=='undefined'&&workspace)render();
 })();

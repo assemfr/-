@@ -75,6 +75,21 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('change',e=>{if(e.target.matches&&e.target.matches('[data-amt-toggle]'))setHide(e.target.checked)});
 
+
+/* ---------- numeric fields: a lone 0 is cleared on focus and restored on blur if left empty ---------- */
+document.addEventListener('focusin',e=>{
+  const i=e.target;if(!i||i.tagName!=='INPUT'||i.readOnly||i.disabled)return;
+  if(i.type!=='number'&&i.getAttribute('inputmode')!=='decimal'&&i.getAttribute('inputmode')!=='numeric')return;
+  const v=String(i.value).trim();
+  if(v!==''&&Number(v)===0){i.dataset.z=v;i.value=''}
+  else if(v!==''){try{i.select()}catch(er){}}
+});
+document.addEventListener('focusout',e=>{
+  const i=e.target;if(!i||i.tagName!=='INPUT'||i.dataset.z===undefined)return;
+  if(String(i.value).trim()==='')i.value=i.dataset.z;
+  delete i.dataset.z;
+});
+
 /* ---------- soft page transition ---------- */
 const _nav=navigate;
 navigate=function(p){_nav(p);const v=document.getElementById('page-view');if(v){v.classList.remove('pv-in');void v.offsetWidth;v.classList.add('pv-in')}};

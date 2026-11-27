@@ -275,3 +275,22 @@ html[data-theme="dark"] .px-wback{background:radial-gradient(ellipse at 30% 10%,
 .px-live.good{border-color:var(--green-2)}.px-live.good span:nth-child(2) b{color:var(--pos)}
 .px-live.bad{border-color:var(--red)}.px-live.bad span:nth-child(2) b{color:var(--neg)}
 @media(min-width:851px){.px-live{bottom:12px}}
+.px-moves>span{display:block;margin-bottom:6px;font-size:.78rem;font-weight:700}
+.px-moves>span em{font-style:normal;font-weight:500;color:var(--muted);font-size:.68rem}
+.px-seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.px-mv{display:flex;flex-direction:column;align-items:center;gap:2px;padding:9px 4px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--ink);text-align:center}
+.px-mv i{font-style:normal;font-size:1.1rem}.px-mv b{font-size:.72rem;line-height:1.3}.px-mv small{font-size:.6rem;color:var(--muted)}
+.px-mv.on{border-color:var(--green-2);background:var(--mint);color:var(--green)}
+.px-mv.on.auto{border-style:dashed}
+
+/* ===== v14: mobile input zoom, toast, wizard check, stock ===== */
+html{touch-action:manipulation;-webkit-text-size-adjust:100%}
+@media (max-width:850px){input,select,textarea,.control,.field input,.field select,.field textarea,.f-input{font-size:16px!important}}
+.toast{inset-inline-start:auto!important;left:12px;right:12px;margin-inline:auto;width:fit-content;max-width:min(92vw,520px);bottom:calc(88px + env(safe-area-inset-bottom))!important;transform:translateY(14px)!important}
+.toast.show{transform:none!important}
+@media(min-width:851px){.toast{bottom:24px!important}}
+.px-check{display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);cursor:pointer}
+.px-check input{margin-top:4px;width:18px;height:18px;flex:none}
+.px-check b{display:block;font-size:.84rem}.px-check small{display:block;color:var(--muted);font-size:.7rem;margin-top:2px}
+.record-card.st-low{border-color:var(--amber)}
+#st-tools{margin-top:4px}
